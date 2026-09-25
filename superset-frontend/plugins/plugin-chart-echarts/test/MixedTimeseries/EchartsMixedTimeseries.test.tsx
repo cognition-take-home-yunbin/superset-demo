@@ -84,15 +84,17 @@ function createQueryData(): ChartDataResponseResult {
 
 function setup(
   formDataOverrides: Partial<EchartsMixedTimeseriesFormData> = {},
+  queryResults?: ChartDataResponseResult[],
 ) {
   const queryData = createQueryData();
+  const queriesData = queryResults ?? [queryData, queryData];
   const chartProps = createEchartsTimeseriesTestChartProps<
     EchartsMixedTimeseriesFormData,
     EchartsMixedTimeseriesProps
   >({
     defaultFormData: DEFAULT_FORM_DATA as EchartsMixedTimeseriesFormData,
     defaultVizType: 'mixed_timeseries',
-    defaultQueriesData: [queryData, queryData],
+    defaultQueriesData: queriesData,
     formData: {
       colorScheme: 'bnbColors',
       metrics: ['sum__num'],
@@ -103,7 +105,7 @@ function setup(
       viz_type: VizType.MixedTimeseries,
       ...formDataOverrides,
     },
-    queriesData: [queryData, queryData],
+    queriesData,
   });
   const transformed = transformProps(chartProps);
   const setDataMask = jest.fn();
@@ -140,6 +142,41 @@ test('EchartsMixedTimeseries click emits cross-filter with tail-anchored dimensi
     { col: 'gender', op: 'IN', val: ['boy'] },
   ]);
   expect(dataMask.filterState.selectedValues).toEqual(['sum__num, boy']);
+});
+
+test('EchartsMixedTimeseries click filters the right dimension for truncated series in each query', () => {
+  const queryA = {
+    ...createQueryData(),
+    data: [{ ds: ts1, boy: 1 }],
+    colnames: ['ds', 'boy'],
+    label_map: { ds: ['ds'], boy: ['boy'] },
+  } as ChartDataResponseResult;
+  const queryB = {
+    ...createQueryData(),
+    data: [{ ds: ts1, CA: 2 }],
+    colnames: ['ds', 'CA'],
+    label_map: { ds: ['ds'], CA: ['CA'] },
+  } as ChartDataResponseResult;
+  const { eventHandlers, setDataMask } = setup(
+    {
+      groupbyB: ['state'],
+      metricsB: ['count'],
+      truncateMetric: true,
+      truncateMetricB: true,
+      showQueryIdentifiers: true,
+    },
+    [queryA, queryB],
+  );
+
+  eventHandlers.click({ seriesName: 'boy (Query A)', seriesIndex: 0 });
+  eventHandlers.click({ seriesName: 'CA (Query B)', seriesIndex: 1 });
+
+  expect(
+    setDataMask.mock.calls.map(([mask]) => mask.extraFormData.filters),
+  ).toEqual([
+    [{ col: 'gender', op: 'IN', val: ['boy'] }],
+    [{ col: 'state', op: 'IN', val: ['CA'] }],
+  ]);
 });
 
 test('EchartsMixedTimeseries click clears filters when the series misses the label map', () => {

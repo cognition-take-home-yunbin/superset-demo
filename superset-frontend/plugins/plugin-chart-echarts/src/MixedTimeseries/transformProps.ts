@@ -251,6 +251,8 @@ export default function transformProps(
     showQueryIdentifiers = false,
     metrics = [],
     metricsB = [],
+    truncateMetric,
+    truncateMetricB,
   }: EchartsMixedTimeseriesFormData = { ...DEFAULT_FORM_DATA, ...formData };
 
   const refs: Refs = {};
@@ -502,7 +504,7 @@ export default function transformProps(
 
     let displayName: string;
 
-    if (groupby.length > 0) {
+    if (groupby.length > 0 && !truncateMetric) {
       // When we have groupby, format as "metric, dimension". Each series
       // belongs to the metric recorded in its label-map tuple
       // ([metric, ...dimensions]) — always using the first metric would
@@ -517,7 +519,9 @@ export default function transformProps(
         : metricDisplayName;
       displayName = entryName.includes(metricPart)
         ? entryName
-        : `${metricPart}, ${entryName}`;
+        : entryName.startsWith(`${metricDisplayName}, `)
+          ? `${metricPart}${entryName.slice(metricDisplayName.length)}`
+          : `${metricPart}, ${entryName}`;
     } else {
       // When no groupby, format as just the entry name with optional query identifier
       displayName = showQueryIdentifiers ? `${entryName} (Query A)` : entryName;
@@ -609,7 +613,7 @@ export default function transformProps(
 
     let displayName: string;
 
-    if (groupbyB.length > 0) {
+    if (groupbyB.length > 0 && !truncateMetricB) {
       // When we have groupby, format as "metric, dimension". Each series
       // belongs to the metric recorded in its label-map tuple
       // ([metric, ...dimensions]) — always using the first metric would
@@ -624,7 +628,9 @@ export default function transformProps(
         : metricDisplayName;
       displayName = entryName.includes(metricPart)
         ? entryName
-        : `${metricPart}, ${entryName}`;
+        : entryName.startsWith(`${metricDisplayName}, `)
+          ? `${metricPart}${entryName.slice(metricDisplayName.length)}`
+          : `${metricPart}, ${entryName}`;
     } else {
       // When no groupby, format as just the entry name with optional query identifier
       displayName = showQueryIdentifiers ? `${entryName} (Query B)` : entryName;

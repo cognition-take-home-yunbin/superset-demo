@@ -336,6 +336,102 @@ test('should transform chart props for viz with showQueryIdentifiers=true', () =
   ]);
 });
 
+test.each(
+  [true, false].flatMap(showQueryIdentifiers => [
+    { truncateMetric: true, truncateMetricB: true, showQueryIdentifiers },
+    { truncateMetric: true, truncateMetricB: false, showQueryIdentifiers },
+    { truncateMetric: false, truncateMetricB: true, showQueryIdentifiers },
+    { truncateMetric: false, truncateMetricB: false, showQueryIdentifiers },
+  ]),
+)(
+  'uses independent metric truncation for both queries (%o)',
+  ({ truncateMetric, truncateMetricB, showQueryIdentifiers }) => {
+    const nameA = truncateMetric ? 'boy' : 'sum__num, boy';
+    const nameB = truncateMetricB ? 'CA' : 'count, CA';
+    const queryA = createTestQueryData([{ ds: 599616000000, [nameA]: 1.25 }], {
+      colnames: ['ds', nameA],
+      coltypes: [GenericDataType.Temporal, GenericDataType.Numeric],
+      label_map: {
+        ds: ['ds'],
+        [nameA]: truncateMetric ? ['boy'] : ['sum__num', 'boy'],
+      },
+    });
+    const queryB = createTestQueryData([{ ds: 599616000000, [nameB]: 2.75 }], {
+      colnames: ['ds', nameB],
+      coltypes: [GenericDataType.Temporal, GenericDataType.Numeric],
+      label_map: {
+        ds: ['ds'],
+        [nameB]: truncateMetricB ? ['CA'] : ['count', 'CA'],
+      },
+    });
+    const chartProps = createEchartsTimeseriesTestChartProps<
+      EchartsMixedTimeseriesFormData,
+      EchartsMixedTimeseriesProps
+    >({
+      ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+      defaultQueriesData: [queryA, queryB],
+      formData: {
+        ...formData,
+        groupbyB: ['state'],
+        metricsB: ['count'],
+        truncateMetric,
+        truncateMetricB,
+        showQueryIdentifiers,
+      },
+      queriesData: [queryA, queryB],
+    });
+    const transformed = transformProps(chartProps);
+    const names = (transformed.echartOptions.series as SeriesOption[]).map(
+      series => series.name,
+    );
+    const expectedA = truncateMetric
+      ? showQueryIdentifiers
+        ? 'boy (Query A)'
+        : 'boy'
+      : showQueryIdentifiers
+        ? 'sum__num (Query A), boy'
+        : 'sum__num, boy';
+    const expectedB = truncateMetricB
+      ? showQueryIdentifiers
+        ? 'CA (Query B)'
+        : 'CA'
+      : showQueryIdentifiers
+        ? 'count (Query B), CA'
+        : 'count, CA';
+
+    expect(names).toEqual([expectedA, expectedB]);
+    expect(
+      (transformed.echartOptions.series as SeriesOption[]).map(s => s.id),
+    ).toEqual(names);
+    expect(
+      (transformed.echartOptions.legend as { data: string[] }).data,
+    ).toEqual(names);
+    expect(transformed.labelMap[expectedA]).toEqual(
+      truncateMetric ? ['boy'] : ['sum__num', 'boy'],
+    );
+    expect(transformed.labelMapB[expectedB]).toEqual(
+      truncateMetricB ? ['CA'] : ['count', 'CA'],
+    );
+    expect(transformed.seriesBreakdown).toBe(1);
+
+    const tooltip = transformed.echartOptions
+      .tooltip as TooltipFormatterOptions['tooltip'];
+    for (const [seriesId, value] of [
+      [expectedA, 1.25],
+      [expectedB, 2.75],
+    ] as const) {
+      const html = tooltip.formatter({
+        value: [599616000000, value],
+        seriesId,
+        marker: '',
+        color: '#333',
+      });
+      expect(html).toContain(seriesId);
+      expect(html).toContain(String(value));
+    }
+  },
+);
+
 test('formats value labels with the formatter for the assigned y-axis', () => {
   const timestamp = 1704067200000;
   const queryAData = createTestQueryData(
