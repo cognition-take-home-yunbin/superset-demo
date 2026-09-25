@@ -1924,3 +1924,208 @@ test('should not apply a dashed lineStyle when timeShiftColor is disabled', () =
   expect(derivedSeries).toBeDefined();
   expect(derivedSeries?.lineStyle?.type).toBeUndefined();
 });
+
+// Fixtures modelling the backend output when Truncate Metric strips the
+// single metric from the flattened column labels (see `renameOperator`).
+const truncatedQueryDataA = createTestQueryData(
+  [
+    { ds: 599616000000, boy: 1, girl: 2 },
+    { ds: 599916000000, boy: 3, girl: 4 },
+  ],
+  {
+    colnames: ['ds', 'boy', 'girl'],
+    coltypes: [
+      GenericDataType.Temporal,
+      GenericDataType.Numeric,
+      GenericDataType.Numeric,
+    ],
+    label_map: { ds: ['ds'], boy: ['boy'], girl: ['girl'] },
+  },
+);
+const truncatedQueryDataB = createTestQueryData(
+  [
+    { ds: 599616000000, CA: 5, NY: 6 },
+    { ds: 599916000000, CA: 7, NY: 8 },
+  ],
+  {
+    colnames: ['ds', 'CA', 'NY'],
+    coltypes: [
+      GenericDataType.Temporal,
+      GenericDataType.Numeric,
+      GenericDataType.Numeric,
+    ],
+    label_map: { ds: ['ds'], CA: ['CA'], NY: ['NY'] },
+  },
+);
+const untruncatedQueryDataB = createTestQueryData(
+  [
+    { ds: 599616000000, 'count, CA': 5, 'count, NY': 6 },
+    { ds: 599916000000, 'count, CA': 7, 'count, NY': 8 },
+  ],
+  {
+    colnames: ['ds', 'count, CA', 'count, NY'],
+    coltypes: [
+      GenericDataType.Temporal,
+      GenericDataType.Numeric,
+      GenericDataType.Numeric,
+    ],
+    label_map: {
+      ds: ['ds'],
+      'count, CA': ['count', 'CA'],
+      'count, NY': ['count', 'NY'],
+    },
+  },
+);
+
+function transformTruncated(
+  overrides: Partial<EchartsMixedTimeseriesFormData>,
+  queriesDataB: ChartDataResponseResult = truncatedQueryDataB,
+) {
+  const queries = [truncatedQueryDataA, queriesDataB];
+  const chartProps = createEchartsTimeseriesTestChartProps<
+    EchartsMixedTimeseriesFormData,
+    EchartsMixedTimeseriesProps
+  >({
+    ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+    defaultQueriesData: queries,
+    formData: {
+      ...formData,
+      metrics: ['sum__num'],
+      metricsB: ['count'],
+      groupby: ['gender'],
+      groupbyB: ['state'],
+      ...overrides,
+    },
+    queriesData: queries,
+  });
+  return transformProps(chartProps);
+}
+
+function getSeriesNames(transformed: ReturnType<typeof transformProps>) {
+  return (transformed.echartOptions.series as SeriesOption[])
+    .map(s => ({ id: String(s.id), name: String(s.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getLegendNames(transformed: ReturnType<typeof transformProps>) {
+  return [...((transformed.echartOptions.legend as any).data as string[])].sort(
+    (a, b) => a.localeCompare(b),
+  );
+}
+
+test('regression #38190: Truncate Metric keeps the metric prefix off both queries', () => {
+  const transformed = transformTruncated({
+    truncateMetric: true,
+    truncateMetricB: true,
+  });
+
+  expect(getSeriesNames(transformed)).toEqual([
+    { id: 'boy', name: 'boy' },
+    { id: 'CA', name: 'CA' },
+    { id: 'girl', name: 'girl' },
+    { id: 'NY', name: 'NY' },
+  ]);
+  expect(getLegendNames(transformed)).toEqual(['boy', 'CA', 'girl', 'NY']);
+  expect(transformed.seriesBreakdown).toBe(2);
+  expect(transformed.labelMap).toEqual({ boy: ['boy'], girl: ['girl'] });
+  expect(transformed.labelMapB).toEqual({ CA: ['CA'], NY: ['NY'] });
+});
+
+test('regression #38190: Truncate Metric applies independently per query', () => {
+  const transformed = transformTruncated(
+    { truncateMetric: true, truncateMetricB: false },
+    untruncatedQueryDataB,
+  );
+
+  expect(getSeriesNames(transformed).map(s => s.name)).toEqual([
+    'boy',
+    'count, CA',
+    'count, NY',
+    'girl',
+  ]);
+  expect(getLegendNames(transformed)).toEqual([
+    'boy',
+    'count, CA',
+    'count, NY',
+    'girl',
+  ]);
+  expect(transformed.labelMap).toEqual({ boy: ['boy'], girl: ['girl'] });
+  expect(transformed.labelMapB).toEqual({
+    'count, CA': ['count', 'CA'],
+    'count, NY': ['count', 'NY'],
+  });
+});
+
+test('regression #38190: disabled Truncate Metric preserves the metric prefix', () => {
+  const transformed = transformTruncated({
+    truncateMetric: false,
+    truncateMetricB: false,
+  });
+
+  expect(getSeriesNames(transformed).map(s => s.name)).toEqual([
+    'count, CA',
+    'count, NY',
+    'sum__num, boy',
+    'sum__num, girl',
+  ]);
+});
+
+test('regression #38190: truncated series keep query identifiers and distinct ids', () => {
+  const transformed = transformTruncated({
+    truncateMetric: true,
+    truncateMetricB: true,
+    showQueryIdentifiers: true,
+  });
+
+  const names = getSeriesNames(transformed);
+  expect(names.map(s => s.name)).toEqual([
+    'boy (Query A)',
+    'CA (Query B)',
+    'girl (Query A)',
+    'NY (Query B)',
+  ]);
+  expect(new Set(names.map(s => s.id)).size).toBe(4);
+  expect(getLegendNames(transformed)).toEqual(names.map(s => s.name));
+  expect(Object.keys(transformed.labelMap).sort()).toEqual([
+    'boy (Query A)',
+    'girl (Query A)',
+  ]);
+  expect(Object.keys(transformed.labelMapB).sort()).toEqual([
+    'CA (Query B)',
+    'NY (Query B)',
+  ]);
+});
+
+test('regression #38190: tooltip names truncated series without the metric prefix', () => {
+  const transformed = transformTruncated({
+    truncateMetric: true,
+    truncateMetricB: true,
+    richTooltip: false,
+    yAxisFormat: undefined,
+    yAxisFormatSecondary: undefined,
+  });
+
+  const { formatter } = (transformed.echartOptions as TooltipFormatterOptions)
+    .tooltip;
+  const series = transformed.echartOptions.series as SeriesOption[];
+  const [seriesA] = series;
+  const [seriesB] = series.slice(transformed.seriesBreakdown);
+
+  const htmlA = formatter({
+    value: [599616000000, 1],
+    seriesId: seriesA.id,
+    marker: '',
+    color: '#333',
+  });
+  expect(htmlA).toMatch(/boy|girl/);
+  expect(htmlA).not.toContain('sum__num');
+
+  const htmlB = formatter({
+    value: [599616000000, 5],
+    seriesId: seriesB.id,
+    marker: '',
+    color: '#333',
+  });
+  expect(htmlB).toMatch(/CA|NY/);
+  expect(htmlB).not.toContain('count');
+});
