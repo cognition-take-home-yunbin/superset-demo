@@ -2129,3 +2129,51 @@ test('regression #38190: tooltip names truncated series without the metric prefi
   expect(htmlB).toMatch(/CA|NY/);
   expect(htmlB).not.toContain('count');
 });
+
+test('verbose metric names replace the raw metric label instead of being prepended', () => {
+  const rows = [{ ds: 599616000000, 'count, NY': 5, 'count, IL': 6 }];
+  const queryData = createTestQueryData(rows, {
+    colnames: ['ds', 'count, NY', 'count, IL'],
+    coltypes: [
+      GenericDataType.Temporal,
+      GenericDataType.Numeric,
+      GenericDataType.Numeric,
+    ],
+    label_map: {
+      ds: ['ds'],
+      'count, NY': ['count', 'NY'],
+      'count, IL': ['count', 'IL'],
+    },
+  });
+  const chartProps = createEchartsTimeseriesTestChartProps<
+    EchartsMixedTimeseriesFormData,
+    EchartsMixedTimeseriesProps
+  >({
+    ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+    defaultQueriesData: [queryData, queryData],
+    formData: {
+      ...formData,
+      metrics: ['count'],
+      metricsB: ['count'],
+      groupby: ['state'],
+      groupbyB: ['state'],
+      truncateMetric: false,
+      truncateMetricB: false,
+    },
+    queriesData: [queryData, queryData],
+    datasource: { verboseMap: { count: 'COUNT(*)' } },
+  });
+  const transformed = transformProps(chartProps);
+
+  expect(getSeriesNames(transformed).map(s => s.name)).toEqual([
+    'COUNT(*), IL',
+    'COUNT(*), IL',
+    'COUNT(*), NY',
+    'COUNT(*), NY',
+  ]);
+  expect(transformed.labelMap).toEqual({
+    'COUNT(*), NY': ['count', 'NY'],
+    'COUNT(*), IL': ['count', 'IL'],
+  });
+  expect(transformed.labelMapB).toEqual(transformed.labelMap);
+});

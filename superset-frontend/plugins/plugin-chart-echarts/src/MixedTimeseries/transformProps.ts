@@ -486,6 +486,36 @@ export default function transformProps(
   const displayLabelMap: Record<string, string[]> = {};
   const displayLabelMapB: Record<string, string[]> = {};
 
+  // Builds the "metric, dimension" display name for a grouped series. Each
+  // series belongs to the metric recorded in its label-map tuple
+  // ([metric, ...dimensions]) — always using the first metric would prepend
+  // it to every other metric's series (#37921). When the backend label
+  // already starts with the raw metric label, that label is swapped for the
+  // display name instead of being prepended again ("COUNT(*), count, NY").
+  // Tuples without a metric part fall back to the query's first metric.
+  const getGroupedDisplayName = (
+    entryName: string,
+    labelMapValues: string[] | undefined,
+    fallbackMetricDisplayName: string,
+    queryIdentifier: string,
+  ): string => {
+    const hasMetricInLabel = !!labelMapValues && labelMapValues.length > 1;
+    const metricDisplayName = hasMetricInLabel
+      ? getMetricDisplayName(labelMapValues[0], verboseMap)
+      : fallbackMetricDisplayName;
+    const metricPart = showQueryIdentifiers
+      ? `${metricDisplayName} ${queryIdentifier}`
+      : metricDisplayName;
+    if (entryName.includes(metricPart)) {
+      return entryName;
+    }
+    const rawMetricPrefix = hasMetricInLabel ? `${labelMapValues[0]}, ` : '';
+    if (rawMetricPrefix && entryName.startsWith(rawMetricPrefix)) {
+      return `${metricPart}, ${entryName.slice(rawMetricPrefix.length)}`;
+    }
+    return `${metricPart}, ${entryName}`;
+  };
+
   rawSeriesA.forEach(entry => {
     const entryName = String(entry.name || '');
     const seriesName = inverted[entryName] || entryName;
@@ -512,21 +542,12 @@ export default function transformProps(
     let displayName: string;
 
     if (groupby.length > 0 && !isMetricTruncatedA) {
-      // When we have groupby, format as "metric, dimension". Each series
-      // belongs to the metric recorded in its label-map tuple
-      // ([metric, ...dimensions]) — always using the first metric would
-      // prepend it to every other metric's series (#37921). Tuples without
-      // a metric part fall back to the first metric as before.
-      const metricDisplayName =
-        labelMapValues && labelMapValues.length > 1
-          ? getMetricDisplayName(labelMapValues[0], verboseMap)
-          : MetricDisplayNameA;
-      const metricPart: string = showQueryIdentifiers
-        ? `${metricDisplayName} (Query A)`
-        : metricDisplayName;
-      displayName = entryName.includes(metricPart)
-        ? entryName
-        : `${metricPart}, ${entryName}`;
+      displayName = getGroupedDisplayName(
+        entryName,
+        labelMapValues,
+        MetricDisplayNameA,
+        '(Query A)',
+      );
     } else {
       // When no groupby, format as just the entry name with optional query identifier
       displayName = showQueryIdentifiers ? `${entryName} (Query A)` : entryName;
@@ -619,21 +640,12 @@ export default function transformProps(
     let displayName: string;
 
     if (groupbyB.length > 0 && !isMetricTruncatedB) {
-      // When we have groupby, format as "metric, dimension". Each series
-      // belongs to the metric recorded in its label-map tuple
-      // ([metric, ...dimensions]) — always using the first metric would
-      // prepend it to every other metric's series (#37921). Tuples without
-      // a metric part fall back to the first metric as before.
-      const metricDisplayName =
-        labelMapValuesB && labelMapValuesB.length > 1
-          ? getMetricDisplayName(labelMapValuesB[0], verboseMap)
-          : MetricDisplayNameB;
-      const metricPart: string = showQueryIdentifiers
-        ? `${metricDisplayName} (Query B)`
-        : metricDisplayName;
-      displayName = entryName.includes(metricPart)
-        ? entryName
-        : `${metricPart}, ${entryName}`;
+      displayName = getGroupedDisplayName(
+        entryName,
+        labelMapValuesB,
+        MetricDisplayNameB,
+        '(Query B)',
+      );
     } else {
       // When no groupby, format as just the entry name with optional query identifier
       displayName = showQueryIdentifiers ? `${entryName} (Query B)` : entryName;
