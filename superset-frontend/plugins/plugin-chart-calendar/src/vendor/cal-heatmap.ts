@@ -587,7 +587,9 @@ var CalHeatMap = function () {
             return self.options.domainDynamicDimension
               ? self.getWeekNumber(
                   new Date(d.getFullYear(), d.getMonth() + 1, 0),
-                ) - self.getWeekNumber(d)
+                ) -
+                  self.getWeekNumber(d) +
+                  1
               : 5;
         }
       },
@@ -599,16 +601,16 @@ var CalHeatMap = function () {
         return self.getSubDomainColumnNumber(d);
       },
       position: {
-        x: function (d) {
+        x: function (d, index) {
           switch (self.options.domain) {
             case 'year':
               return Math.floor(
                 self.getWeekNumber(d) / self._domainType.week.row(d),
               );
             case 'month':
-              return Math.floor(
-                self.getMonthWeekNumber(d) / self._domainType.week.row(d),
-              );
+              // A month block also contains the week that starts in the
+              // previous month, so the cell date alone cannot place it.
+              return Math.floor(index / self._domainType.week.row(d));
           }
         },
         y: function (d) {
@@ -1061,11 +1063,11 @@ var CalHeatMap = function () {
       })
       .attr('width', options.cellSize)
       .attr('height', options.cellSize)
-      .attr('x', function (d) {
-        return self.positionSubDomainX(d.t);
+      .attr('x', function (d, i) {
+        return self.positionSubDomainX(d.t, i);
       })
-      .attr('y', function (d) {
-        return self.positionSubDomainY(d.t);
+      .attr('y', function (d, i) {
+        return self.positionSubDomainY(d.t, i);
       })
       .on('click', function (d) {
         if (options.onClick !== null) {
@@ -1229,11 +1231,11 @@ var CalHeatMap = function () {
         .attr('class', function (d) {
           return 'subdomain-text' + self.getHighlightClassName(d.t);
         })
-        .attr('x', function (d) {
-          return self.positionSubDomainX(d.t) + options.cellSize / 2;
+        .attr('x', function (d, i) {
+          return self.positionSubDomainX(d.t, i) + options.cellSize / 2;
         })
-        .attr('y', function (d) {
-          return self.positionSubDomainY(d.t) + options.cellSize / 2;
+        .attr('y', function (d, i) {
+          return self.positionSubDomainY(d.t, i) + options.cellSize / 2;
         })
         .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'central')
@@ -2210,20 +2212,22 @@ CalHeatMap.prototype = {
   // POSITIONNING                                //
   // =========================================================================//
 
-  positionSubDomainX: function (d) {
+  positionSubDomainX: function (d, subDomainIndex) {
     'use strict';
 
     var index = this._domainType[this.options.subDomain].position.x(
       new Date(d),
+      subDomainIndex,
     );
     return index * this.options.cellSize + index * this.options.cellPadding;
   },
 
-  positionSubDomainY: function (d) {
+  positionSubDomainY: function (d, subDomainIndex) {
     'use strict';
 
     var index = this._domainType[this.options.subDomain].position.y(
       new Date(d),
+      subDomainIndex,
     );
     return index * this.options.cellSize + index * this.options.cellPadding;
   },
@@ -2447,25 +2451,6 @@ CalHeatMap.prototype = {
         ? d3.time.format('%W')
         : d3.time.format('%U');
     return f(d);
-  },
-
-  /**
-   * Return the week number, relative to its month
-   *
-   * @param  int|Date d Date or timestamp in milliseconds
-   * @return int Week number, relative to the month [0-5]
-   */
-  getMonthWeekNumber: function (d) {
-    'use strict';
-
-    if (typeof d === 'number') {
-      d = new Date(d);
-    }
-
-    var monthFirstWeekNumber = this.getWeekNumber(
-      new Date(d.getFullYear(), d.getMonth()),
-    );
-    return this.getWeekNumber(d) - monthFirstWeekNumber - 1;
   },
 
   /**
