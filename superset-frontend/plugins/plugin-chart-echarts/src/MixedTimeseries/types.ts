@@ -85,6 +85,8 @@ export type EchartsMixedTimeseriesFormData = QueryFormData & {
   orderDescB: boolean;
   rowLimit: number;
   rowLimitB: number;
+  truncateMetric?: boolean;
+  truncateMetricB?: boolean;
   seriesType: EchartsTimeseriesSeriesType;
   seriesTypeB: EchartsTimeseriesSeriesType;
   showValue: boolean;
