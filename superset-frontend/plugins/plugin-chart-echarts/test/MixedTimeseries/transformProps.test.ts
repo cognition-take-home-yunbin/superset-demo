@@ -1924,3 +1924,295 @@ test('should not apply a dashed lineStyle when timeShiftColor is disabled', () =
   expect(derivedSeries).toBeDefined();
   expect(derivedSeries?.lineStyle?.type).toBeUndefined();
 });
+
+describe('Truncate Metric', () => {
+  const truncatedRowsA = [
+    { ds: 599616000000, boy: 0.1, girl: 0.2 },
+    { ds: 599916000000, boy: 0.3, girl: 0.4 },
+  ];
+  const truncatedRowsB = [
+    { ds: 599616000000, CA: 5, NY: 6 },
+    { ds: 599916000000, CA: 7, NY: 8 },
+  ];
+  const untruncatedRowsA = [
+    { ds: 599616000000, 'sum__num, boy': 0.1, 'sum__num, girl': 0.2 },
+    { ds: 599916000000, 'sum__num, boy': 0.3, 'sum__num, girl': 0.4 },
+  ];
+  const untruncatedRowsB = [
+    { ds: 599616000000, 'count, CA': 5, 'count, NY': 6 },
+    { ds: 599916000000, 'count, CA': 7, 'count, NY': 8 },
+  ];
+
+  // With a single metric, renameOperator drops the metric level from the
+  // pivoted columns when truncation is on, so both the column names and the
+  // label_map tuples contain only the dimension values.
+  const queryA = (truncated: boolean) =>
+    truncated
+      ? createTestQueryData(truncatedRowsA, {
+          label_map: { ds: ['ds'], boy: ['boy'], girl: ['girl'] },
+        })
+      : createTestQueryData(untruncatedRowsA, {
+          label_map: {
+            ds: ['ds'],
+            'sum__num, boy': ['sum__num', 'boy'],
+            'sum__num, girl': ['sum__num', 'girl'],
+          },
+        });
+  const queryB = (truncated: boolean) =>
+    truncated
+      ? createTestQueryData(truncatedRowsB, {
+          label_map: { ds: ['ds'], CA: ['CA'], NY: ['NY'] },
+        })
+      : createTestQueryData(untruncatedRowsB, {
+          label_map: {
+            ds: ['ds'],
+            'count, CA': ['count', 'CA'],
+            'count, NY': ['count', 'NY'],
+          },
+        });
+
+  const transformWithTruncation = (
+    truncateMetric: boolean,
+    truncateMetricB: boolean,
+    overrides: Partial<EchartsMixedTimeseriesFormData> = {},
+    datasource: Record<string, unknown> = {},
+  ) => {
+    const data = [queryA(truncateMetric), queryB(truncateMetricB)];
+    return transformProps(
+      createEchartsTimeseriesTestChartProps<
+        EchartsMixedTimeseriesFormData,
+        EchartsMixedTimeseriesProps
+      >({
+        ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+        defaultQueriesData: data,
+        formData: {
+          ...formData,
+          metrics: ['sum__num'],
+          metricsB: ['count'],
+          groupby: ['gender'],
+          groupbyB: ['state'],
+          truncateMetric,
+          truncateMetricB,
+          showLegend: true,
+          ...overrides,
+        },
+        queriesData: data,
+        datasource,
+      }),
+    );
+  };
+
+  const sorted = (values: string[]) => [...values].sort();
+
+  const seriesField = (
+    transformed: ReturnType<typeof transformProps>,
+    field: 'id' | 'name',
+  ) =>
+    (transformed.echartOptions.series as SeriesOption[]).map(series =>
+      String(series[field]),
+    );
+
+  test.each([
+    {
+      truncateMetric: true,
+      truncateMetricB: true,
+      expected: ['boy', 'girl', 'CA', 'NY'],
+    },
+    {
+      truncateMetric: true,
+      truncateMetricB: false,
+      expected: ['boy', 'girl', 'count, CA', 'count, NY'],
+    },
+    {
+      truncateMetric: false,
+      truncateMetricB: true,
+      expected: ['sum__num, boy', 'sum__num, girl', 'CA', 'NY'],
+    },
+    {
+      truncateMetric: false,
+      truncateMetricB: false,
+      expected: ['sum__num, boy', 'sum__num, girl', 'count, CA', 'count, NY'],
+    },
+  ])(
+    'series and legend names honor truncateMetric=$truncateMetric / truncateMetricB=$truncateMetricB',
+    ({ truncateMetric, truncateMetricB, expected }) => {
+      const transformed = transformWithTruncation(
+        truncateMetric,
+        truncateMetricB,
+      );
+
+      expect(sorted(seriesField(transformed, 'name'))).toEqual(
+        sorted(expected),
+      );
+      expect(sorted(seriesField(transformed, 'id'))).toEqual(sorted(expected));
+      expect(sorted((transformed.echartOptions.legend as any).data)).toEqual(
+        sorted(expected),
+      );
+      expect(sorted(Object.keys(transformed.labelMap))).toEqual(
+        sorted(expected.slice(0, 2)),
+      );
+      expect(sorted(Object.keys(transformed.labelMapB))).toEqual(
+        sorted(expected.slice(2)),
+      );
+    },
+  );
+
+  test('cross-filter label maps resolve truncated series to dimension values', () => {
+    const transformed = transformWithTruncation(true, true);
+
+    expect(transformed.labelMap).toEqual({ boy: ['boy'], girl: ['girl'] });
+    expect(transformed.labelMapB).toEqual({ CA: ['CA'], NY: ['NY'] });
+  });
+
+  test('query identifiers keep truncated series from both queries distinct', () => {
+    const transformed = transformWithTruncation(true, true, {
+      showQueryIdentifiers: true,
+    });
+    const expected = [
+      'boy (Query A)',
+      'girl (Query A)',
+      'CA (Query B)',
+      'NY (Query B)',
+    ];
+
+    expect(sorted(seriesField(transformed, 'name'))).toEqual(sorted(expected));
+    expect(sorted(seriesField(transformed, 'id'))).toEqual(sorted(expected));
+    expect(sorted((transformed.echartOptions.legend as any).data)).toEqual(
+      sorted(expected),
+    );
+    expect(sorted(Object.keys(transformed.labelMap))).toEqual(
+      sorted(expected.slice(0, 2)),
+    );
+    expect(sorted(Object.keys(transformed.labelMapB))).toEqual(
+      sorted(expected.slice(2)),
+    );
+  });
+
+  test('query identifiers keep the metric prefix when truncation is disabled', () => {
+    const transformed = transformWithTruncation(false, false, {
+      showQueryIdentifiers: true,
+    });
+
+    expect(sorted(seriesField(transformed, 'name'))).toEqual(
+      sorted([
+        'sum__num (Query A), sum__num, boy',
+        'sum__num (Query A), sum__num, girl',
+        'count (Query B), count, CA',
+        'count (Query B), count, NY',
+      ]),
+    );
+  });
+
+  test('truncation does not strip metrics from multi-metric queries', () => {
+    const rows = [{ ds: 599616000000, 'sum__num, boy': 1, 'avg__num, boy': 2 }];
+    const multiMetricData = createTestQueryData(rows, {
+      label_map: {
+        ds: ['ds'],
+        'sum__num, boy': ['sum__num', 'boy'],
+        'avg__num, boy': ['avg__num', 'boy'],
+      },
+    });
+    const data = [multiMetricData, queryB(true)];
+    const transformed = transformProps(
+      createEchartsTimeseriesTestChartProps<
+        EchartsMixedTimeseriesFormData,
+        EchartsMixedTimeseriesProps
+      >({
+        ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+        defaultQueriesData: data,
+        formData: {
+          ...formData,
+          metrics: ['sum__num', 'avg__num'],
+          metricsB: ['count'],
+          groupby: ['gender'],
+          groupbyB: ['state'],
+          truncateMetric: true,
+          truncateMetricB: true,
+        },
+        queriesData: data,
+      }),
+    );
+
+    expect(sorted(seriesField(transformed, 'name'))).toEqual(
+      sorted(['sum__num, boy', 'avg__num, boy', 'CA', 'NY']),
+    );
+  });
+
+  test('time comparison series naming is unaffected by truncation', () => {
+    const rows = [
+      { ds: 599616000000, 'sum__num, boy': 1, '1 week ago, boy': 2 },
+    ];
+    const timeCompareData = createTestQueryData(rows, {
+      label_map: {
+        ds: ['ds'],
+        'sum__num, boy': ['sum__num', 'boy'],
+        '1 week ago, boy': ['1 week ago', 'boy'],
+      },
+    });
+    const namesWithTruncation = (truncateMetric: boolean) => {
+      const data = [timeCompareData, queryB(false)];
+      return seriesField(
+        transformProps(
+          createEchartsTimeseriesTestChartProps<
+            EchartsMixedTimeseriesFormData,
+            EchartsMixedTimeseriesProps
+          >({
+            ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+            defaultQueriesData: data,
+            formData: {
+              ...formData,
+              metrics: ['sum__num'],
+              metricsB: ['count'],
+              groupby: ['gender'],
+              groupbyB: ['state'],
+              time_compare: ['1 week ago'],
+              comparison_type: ComparisonType.Values,
+              truncateMetric,
+            },
+            queriesData: data,
+          }),
+        ),
+        'name',
+      );
+    };
+
+    expect(namesWithTruncation(true)).toEqual(namesWithTruncation(false));
+  });
+
+  test('tooltip shows truncated series names with per-query formatters', () => {
+    const transformed = transformWithTruncation(
+      true,
+      true,
+      {
+        yAxisFormat: undefined,
+        yAxisFormatSecondary: undefined,
+        yAxisIndex: 0,
+        yAxisIndexB: 1,
+      },
+      { columnFormats: { sum__num: '.1%', count: '.2f' } },
+    );
+    const formatter = (transformed.echartOptions.tooltip as any).formatter as (
+      params: unknown,
+    ) => string;
+
+    const htmlA = formatter({
+      value: [599616000000, 0.1],
+      seriesId: 'boy',
+      marker: '',
+      color: '#333',
+    });
+    expect(htmlA).toContain('boy');
+    expect(htmlA).not.toContain('sum__num');
+    expect(htmlA).toContain('10.0%');
+
+    const htmlB = formatter({
+      value: [599616000000, 5],
+      seriesId: 'CA',
+      marker: '',
+      color: '#333',
+    });
+    expect(htmlB).toContain('CA');
+    expect(htmlB).not.toContain('count');
+    expect(htmlB).toContain('5.00');
+  });
+});

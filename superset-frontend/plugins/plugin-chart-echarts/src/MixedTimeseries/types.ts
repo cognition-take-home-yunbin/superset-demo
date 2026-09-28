@@ -89,6 +89,8 @@ export type EchartsMixedTimeseriesFormData = QueryFormData & {
   seriesTypeB: EchartsTimeseriesSeriesType;
   showValue: boolean;
   showValueB: boolean;
+  truncateMetric?: boolean;
+  truncateMetricB?: boolean;
   /**
    * Where the data label sits relative to its data point on query A, applied
    * when `showValue` is on.
