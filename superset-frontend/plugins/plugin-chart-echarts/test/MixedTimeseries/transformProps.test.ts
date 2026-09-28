@@ -1512,6 +1512,165 @@ test('regression #37921: multi-metric Query A with groupby does not duplicate fi
   }
 });
 
+// Fixtures modelling the backend output when "Truncate Metric" is enabled on a
+// single-metric query with one dimension: the rename post-processing drops the
+// metric level, so column names and label_map tuples omit the metric.
+const truncatedQueryARows = [
+  { boy: 1, girl: 2, ds: 599616000000 },
+  { boy: 3, girl: 4, ds: 599916000000 },
+];
+const truncatedQueryALabelMap = { ds: ['ds'], boy: ['boy'], girl: ['girl'] };
+const truncatedQueryBRows = [
+  { CA: 10, NY: 20, ds: 599616000000 },
+  { CA: 30, NY: 40, ds: 599916000000 },
+];
+const truncatedQueryBLabelMap = { ds: ['ds'], CA: ['CA'], NY: ['NY'] };
+// Backend output when truncation is disabled: the metric level is retained.
+const untruncatedQueryBRows = [
+  { 'count, CA': 10, 'count, NY': 20, ds: 599616000000 },
+  { 'count, CA': 30, 'count, NY': 40, ds: 599916000000 },
+];
+const untruncatedQueryBLabelMap = {
+  ds: ['ds'],
+  'count, CA': ['count', 'CA'],
+  'count, NY': ['count', 'NY'],
+};
+
+function transformTruncateMetricFixture(
+  formDataOverrides: Partial<EchartsMixedTimeseriesFormData>,
+  queryBRows: unknown[] = truncatedQueryBRows,
+  queryBLabelMap: Record<string, string[]> = truncatedQueryBLabelMap,
+) {
+  const truncatedQueriesData = [
+    createTestQueryData(truncatedQueryARows, {
+      label_map: truncatedQueryALabelMap,
+    }),
+    createTestQueryData(queryBRows, { label_map: queryBLabelMap }),
+  ];
+  const chartProps = createEchartsTimeseriesTestChartProps<
+    EchartsMixedTimeseriesFormData,
+    EchartsMixedTimeseriesProps
+  >({
+    ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+    defaultQueriesData: truncatedQueriesData,
+    formData: {
+      ...formData,
+      metrics: ['sum__num'],
+      metricsB: ['count'],
+      groupby: ['gender'],
+      groupbyB: ['state'],
+      ...formDataOverrides,
+    },
+    queriesData: truncatedQueriesData,
+  });
+  return transformProps(chartProps);
+}
+
+function getSeriesNames(transformed: ReturnType<typeof transformProps>) {
+  return (transformed.echartOptions.series as SeriesOption[]).map(s =>
+    String(s.name),
+  );
+}
+
+function getLegendData(transformed: ReturnType<typeof transformProps>) {
+  return (transformed.echartOptions.legend as { data: string[] }).data;
+}
+
+test('truncate metric: enabled on both queries omits the metric prefix from series and legend', () => {
+  const transformed = transformTruncateMetricFixture({
+    truncateMetric: true,
+    truncateMetricB: true,
+  });
+  const names = getSeriesNames(transformed);
+  expect(names).toEqual(['girl', 'boy', 'NY', 'CA']);
+  expect(getLegendData(transformed)).toEqual(names);
+  expect(transformed.labelMap).toEqual({
+    boy: ['boy'],
+    girl: ['girl'],
+  });
+  expect(transformed.labelMapB).toEqual({
+    CA: ['CA'],
+    NY: ['NY'],
+  });
+});
+
+test('truncate metric: settings apply independently to Query A and Query B', () => {
+  const transformed = transformTruncateMetricFixture(
+    { truncateMetric: true, truncateMetricB: false },
+    untruncatedQueryBRows,
+    untruncatedQueryBLabelMap,
+  );
+  const names = getSeriesNames(transformed);
+  expect(names).toEqual(['girl', 'boy', 'count, NY', 'count, CA']);
+  expect(getLegendData(transformed)).toEqual(names);
+  expect(transformed.labelMap).toEqual({ boy: ['boy'], girl: ['girl'] });
+  expect(transformed.labelMapB).toEqual({
+    'count, CA': ['count', 'CA'],
+    'count, NY': ['count', 'NY'],
+  });
+});
+
+test('truncate metric: disabled keeps the metric prefix on truncated-shaped data', () => {
+  const transformed = transformTruncateMetricFixture({
+    truncateMetric: false,
+    truncateMetricB: false,
+  });
+  expect(getSeriesNames(transformed)).toEqual([
+    'sum__num, girl',
+    'sum__num, boy',
+    'count, NY',
+    'count, CA',
+  ]);
+});
+
+test('truncate metric: enabled keeps query identifiers and distinct series ids', () => {
+  const transformed = transformTruncateMetricFixture({
+    truncateMetric: true,
+    truncateMetricB: true,
+    showQueryIdentifiers: true,
+  });
+  const series = transformed.echartOptions.series as SeriesOption[];
+  const names = series.map(s => String(s.name));
+  expect(names).toEqual([
+    'girl (Query A)',
+    'boy (Query A)',
+    'NY (Query B)',
+    'CA (Query B)',
+  ]);
+  expect(series.map(s => String(s.id))).toEqual(names);
+  expect(new Set(series.map(s => s.id)).size).toBe(series.length);
+  expect(transformed.labelMap).toEqual({
+    'boy (Query A)': ['boy'],
+    'girl (Query A)': ['girl'],
+  });
+  expect(transformed.labelMapB).toEqual({
+    'CA (Query B)': ['CA'],
+    'NY (Query B)': ['NY'],
+  });
+});
+
+test('truncate metric: tooltip rows use the truncated series names and per-axis formatters', () => {
+  const transformed = transformTruncateMetricFixture({
+    truncateMetric: true,
+    truncateMetricB: true,
+    richTooltip: true,
+    yAxisFormat: '.1f',
+    yAxisFormatSecondary: '.3f',
+    yAxisIndexB: 1,
+  });
+  const { tooltip } = transformed.echartOptions as TooltipFormatterOptions;
+  const html = tooltip.formatter([
+    { seriesId: 'girl', value: [599616000000, 2], marker: '', color: '' },
+    { seriesId: 'CA', value: [599616000000, 10], marker: '', color: '' },
+  ]);
+  expect(html).toContain('girl');
+  expect(html).toContain('2.0');
+  expect(html).toContain('CA');
+  expect(html).toContain('10.000');
+  expect(html).not.toContain('sum__num');
+  expect(html).not.toContain('count');
+});
+
 test('y-axis title position: Left sets nameLocation to middle', () => {
   const chartProps = createEchartsTimeseriesTestChartProps<
     EchartsMixedTimeseriesFormData,

@@ -73,6 +73,8 @@ export type EchartsMixedTimeseriesFormData = QueryFormData & {
   // types specific to Query A and Query B
   area: boolean;
   areaB: boolean;
+  truncateMetric?: boolean;
+  truncateMetricB?: boolean;
   contributionMode?: ContributionType;
   contributionModeB?: ContributionType;
   markerEnabled: boolean;

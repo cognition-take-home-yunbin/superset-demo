@@ -251,6 +251,8 @@ export default function transformProps(
     showQueryIdentifiers = false,
     metrics = [],
     metricsB = [],
+    truncateMetric,
+    truncateMetricB,
   }: EchartsMixedTimeseriesFormData = { ...DEFAULT_FORM_DATA, ...formData };
 
   const refs: Refs = {};
@@ -280,6 +282,13 @@ export default function transformProps(
     getMetricDisplayName(metrics[0], verboseMap) || '';
   const MetricDisplayNameB: string =
     getMetricDisplayName(metricsB[0], verboseMap) || '';
+  // Mirrors renameOperator: with "Truncate Metric" enabled on a single-metric
+  // query with dimensions, the backend strips the metric level from the
+  // series names, so the display name must not prepend it again.
+  const isMetricTruncatedA =
+    !!truncateMetric && ensureIsArray(metrics).length === 1;
+  const isMetricTruncatedB =
+    !!truncateMetricB && ensureIsArray(metricsB).length === 1;
 
   const dataTypes = getColtypesMapping(queriesData[0]);
   const xAxisDataType = dataTypes?.[xAxisLabel] ?? dataTypes?.[xAxisOrig];
@@ -502,7 +511,7 @@ export default function transformProps(
 
     let displayName: string;
 
-    if (groupby.length > 0) {
+    if (groupby.length > 0 && !isMetricTruncatedA) {
       // When we have groupby, format as "metric, dimension". Each series
       // belongs to the metric recorded in its label-map tuple
       // ([metric, ...dimensions]) — always using the first metric would
@@ -609,7 +618,7 @@ export default function transformProps(
 
     let displayName: string;
 
-    if (groupbyB.length > 0) {
+    if (groupbyB.length > 0 && !isMetricTruncatedB) {
       // When we have groupby, format as "metric, dimension". Each series
       // belongs to the metric recorded in its label-map tuple
       // ([metric, ...dimensions]) — always using the first metric would
