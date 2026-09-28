@@ -1924,3 +1924,237 @@ test('should not apply a dashed lineStyle when timeShiftColor is disabled', () =
   expect(derivedSeries).toBeDefined();
   expect(derivedSeries?.lineStyle?.type).toBeUndefined();
 });
+
+describe('Truncate Metric', () => {
+  const truncatedRowsA = [
+    { ds: 599616000000, boy: 1, girl: 2 },
+    { ds: 599916000000, boy: 3, girl: 4 },
+  ];
+  const truncatedRowsB = [
+    { ds: 599616000000, CA: 5, NY: 6 },
+    { ds: 599916000000, CA: 7, NY: 8 },
+  ];
+  const fullRowsA = [
+    { ds: 599616000000, 'sum__num, boy': 1, 'sum__num, girl': 2 },
+    { ds: 599916000000, 'sum__num, boy': 3, 'sum__num, girl': 4 },
+  ];
+  const fullRowsB = [
+    { ds: 599616000000, 'count, CA': 5, 'count, NY': 6 },
+    { ds: 599916000000, 'count, CA': 7, 'count, NY': 8 },
+  ];
+
+  // Series are stacked, so they are ordered by descending total value.
+  // Mirrors the backend response shape: with truncation the metric level is
+  // dropped from both the flattened column names and the label_map tuples.
+  const queryDataA = (truncated: boolean) =>
+    truncated
+      ? createTestQueryData(truncatedRowsA, {
+          label_map: { ds: ['ds'], boy: ['boy'], girl: ['girl'] },
+        })
+      : createTestQueryData(fullRowsA, {
+          label_map: {
+            ds: ['ds'],
+            'sum__num, boy': ['sum__num', 'boy'],
+            'sum__num, girl': ['sum__num', 'girl'],
+          },
+        });
+  const queryDataB = (truncated: boolean) =>
+    truncated
+      ? createTestQueryData(truncatedRowsB, {
+          label_map: { ds: ['ds'], CA: ['CA'], NY: ['NY'] },
+        })
+      : createTestQueryData(fullRowsB, {
+          label_map: {
+            ds: ['ds'],
+            'count, CA': ['count', 'CA'],
+            'count, NY': ['count', 'NY'],
+          },
+        });
+
+  const transformTruncated = (
+    truncateA: boolean | undefined,
+    truncateB: boolean | undefined,
+    overrides: Partial<EchartsMixedTimeseriesFormData> = {},
+  ) => {
+    const effectiveTruncateB = truncateB ?? truncateA;
+    const data = [queryDataA(!!truncateA), queryDataB(!!effectiveTruncateB)];
+    const chartProps = createEchartsTimeseriesTestChartProps<
+      EchartsMixedTimeseriesFormData,
+      EchartsMixedTimeseriesProps
+    >({
+      ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+      defaultQueriesData: data,
+      formData: {
+        ...formData,
+        metrics: ['sum__num'],
+        metricsB: ['count'],
+        groupby: ['gender'],
+        groupbyB: ['state'],
+        truncateMetric: truncateA,
+        truncateMetricB: truncateB,
+        ...overrides,
+      },
+      queriesData: data,
+    });
+    return transformProps(chartProps);
+  };
+
+  const seriesNames = (transformed: ReturnType<typeof transformProps>) =>
+    (transformed.echartOptions.series as SeriesOption[]).map(s =>
+      String(s.name),
+    );
+
+  test.each([
+    {
+      truncateA: true,
+      truncateB: true,
+      expected: ['girl', 'boy', 'NY', 'CA'],
+    },
+    {
+      truncateA: true,
+      truncateB: false,
+      expected: ['girl', 'boy', 'count, NY', 'count, CA'],
+    },
+    {
+      truncateA: false,
+      truncateB: true,
+      expected: ['sum__num, girl', 'sum__num, boy', 'NY', 'CA'],
+    },
+    {
+      truncateA: false,
+      truncateB: false,
+      expected: ['sum__num, girl', 'sum__num, boy', 'count, NY', 'count, CA'],
+    },
+    {
+      // Query B inherits Query A's setting when truncate_metric_b is unset
+      truncateA: true,
+      truncateB: undefined,
+      expected: ['girl', 'boy', 'NY', 'CA'],
+    },
+  ])(
+    'series and legend names honor truncateMetric=$truncateA / truncateMetricB=$truncateB',
+    ({ truncateA, truncateB, expected }) => {
+      const transformed = transformTruncated(truncateA, truncateB);
+      const series = transformed.echartOptions.series as SeriesOption[];
+
+      expect(seriesNames(transformed)).toEqual(expected);
+      expect(series.map(s => String(s.id))).toEqual(expected);
+      expect((transformed.echartOptions.legend as any).data).toEqual(expected);
+    },
+  );
+
+  test('truncated series keep query identifiers and distinct ids', () => {
+    const transformed = transformTruncated(true, true, {
+      showQueryIdentifiers: true,
+    });
+    // Query B reuses Query A's metric and dimension values here
+    const data = [queryDataA(true), queryDataA(true)];
+    const sameShape = transformProps(
+      createEchartsTimeseriesTestChartProps<
+        EchartsMixedTimeseriesFormData,
+        EchartsMixedTimeseriesProps
+      >({
+        ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+        defaultQueriesData: data,
+        formData: {
+          ...formData,
+          truncateMetric: true,
+          truncateMetricB: true,
+          showQueryIdentifiers: true,
+        },
+        queriesData: data,
+      }),
+    );
+
+    expect(seriesNames(transformed)).toEqual([
+      'girl (Query A)',
+      'boy (Query A)',
+      'NY (Query B)',
+      'CA (Query B)',
+    ]);
+    const expected = [
+      'girl (Query A)',
+      'boy (Query A)',
+      'girl (Query B)',
+      'boy (Query B)',
+    ];
+    const series = sameShape.echartOptions.series as SeriesOption[];
+    expect(seriesNames(sameShape)).toEqual(expected);
+    expect(series.map(s => String(s.id))).toEqual(expected);
+    expect((sameShape.echartOptions.legend as any).data).toEqual(expected);
+  });
+
+  test('cross-filter label maps are keyed by the truncated series names', () => {
+    const transformed = transformTruncated(true, true);
+
+    expect(transformed.labelMap).toEqual({ boy: ['boy'], girl: ['girl'] });
+    expect(transformed.labelMapB).toEqual({ CA: ['CA'], NY: ['NY'] });
+  });
+
+  test('tooltip rows show the truncated series names and per-query formats', () => {
+    const transformed = transformTruncated(true, true, {
+      yAxisFormat: '.2%',
+      yAxisFormatSecondary: '.1f',
+      yAxisIndex: 0,
+      yAxisIndexB: 1,
+    });
+    const formatter = (transformed.echartOptions.tooltip as any).formatter as (
+      params: unknown,
+    ) => string;
+
+    const htmlA = formatter({
+      value: [599616000000, 0.5],
+      seriesId: 'boy',
+      marker: '',
+      color: '#333',
+    });
+    expect(htmlA).toContain('boy');
+    expect(htmlA).not.toContain('sum__num');
+    expect(htmlA).toContain('50.00%');
+
+    const htmlB = formatter({
+      value: [599616000000, 2.5],
+      seriesId: 'CA',
+      marker: '',
+      color: '#333',
+    });
+    expect(htmlB).toContain('CA');
+    expect(htmlB).not.toContain('count');
+    expect(htmlB).toContain('2.5');
+  });
+
+  test('truncateMetric does not strip names when multiple metrics prevent truncation', () => {
+    const rows = [{ ds: 599616000000, 'sum__num, boy': 1, 'avg__num, boy': 2 }];
+    const data = createTestQueryData(rows, {
+      label_map: {
+        ds: ['ds'],
+        'sum__num, boy': ['sum__num', 'boy'],
+        'avg__num, boy': ['avg__num', 'boy'],
+      },
+    });
+    const transformed = transformProps(
+      createEchartsTimeseriesTestChartProps<
+        EchartsMixedTimeseriesFormData,
+        EchartsMixedTimeseriesProps
+      >({
+        ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+        defaultQueriesData: [data, data],
+        formData: {
+          ...formData,
+          metrics: ['sum__num', 'avg__num'],
+          metricsB: ['sum__num', 'avg__num'],
+          truncateMetric: true,
+          truncateMetricB: true,
+        },
+        queriesData: [data, data],
+      }),
+    );
+
+    expect(seriesNames(transformed)).toEqual([
+      'sum__num, boy',
+      'avg__num, boy',
+      'sum__num, boy',
+      'avg__num, boy',
+    ]);
+  });
+});

@@ -67,6 +67,8 @@ export type EchartsMixedTimeseriesFormData = QueryFormData & {
   zoomable: boolean;
   richTooltip: boolean;
   showQueryIdentifiers?: boolean;
+  truncateMetric?: boolean;
+  truncateMetricB?: boolean;
   xAxisLabelRotation: number;
   xAxisLabelInterval?: number | string;
   colorScheme?: string;
