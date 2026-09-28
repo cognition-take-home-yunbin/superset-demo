@@ -213,6 +213,8 @@ export default function transformProps(
     stackB,
     truncateXAxis,
     truncateYAxis,
+    truncateMetric,
+    truncateMetricB,
     tooltipTimeFormat,
     yAxisFormat,
     currencyFormat,
@@ -502,7 +504,7 @@ export default function transformProps(
 
     let displayName: string;
 
-    if (groupby.length > 0) {
+    if (groupby.length > 0 && !truncateMetric) {
       // When we have groupby, format as "metric, dimension". Each series
       // belongs to the metric recorded in its label-map tuple
       // ([metric, ...dimensions]) — always using the first metric would
@@ -519,7 +521,8 @@ export default function transformProps(
         ? entryName
         : `${metricPart}, ${entryName}`;
     } else {
-      // When no groupby, format as just the entry name with optional query identifier
+      // When no groupby or the metric is truncated, format as just the entry
+      // name with optional query identifier
       displayName = showQueryIdentifiers ? `${entryName} (Query A)` : entryName;
     }
     if (labelMapValues) {
@@ -609,7 +612,7 @@ export default function transformProps(
 
     let displayName: string;
 
-    if (groupbyB.length > 0) {
+    if (groupbyB.length > 0 && !truncateMetricB) {
       // When we have groupby, format as "metric, dimension". Each series
       // belongs to the metric recorded in its label-map tuple
       // ([metric, ...dimensions]) — always using the first metric would
@@ -626,7 +629,8 @@ export default function transformProps(
         ? entryName
         : `${metricPart}, ${entryName}`;
     } else {
-      // When no groupby, format as just the entry name with optional query identifier
+      // When no groupby or the metric is truncated, format as just the entry
+      // name with optional query identifier
       displayName = showQueryIdentifiers ? `${entryName} (Query B)` : entryName;
     }
     if (labelMapValuesB) {

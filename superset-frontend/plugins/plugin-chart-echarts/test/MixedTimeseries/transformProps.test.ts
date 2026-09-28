@@ -336,6 +336,191 @@ test('should transform chart props for viz with showQueryIdentifiers=true', () =
   ]);
 });
 
+// Query responses with Truncate Metric enabled: the backend rename operator
+// has already dropped the single metric from the flattened column names, so
+// label_map keys omit the metric while the values keep the full tuple.
+const truncatedRowsA = [
+  { boy: 1, girl: 2, ds: 599616000000 },
+  { boy: 3, girl: 4, ds: 599916000000 },
+];
+const truncatedQueryDataA = createTestQueryData(truncatedRowsA, {
+  colnames: ['ds', 'boy', 'girl'],
+  coltypes: [
+    GenericDataType.Temporal,
+    GenericDataType.Numeric,
+    GenericDataType.Numeric,
+  ],
+  label_map: {
+    ds: ['ds'],
+    boy: ['sum__num', 'boy'],
+    girl: ['sum__num', 'girl'],
+  },
+});
+const truncatedRowsB = [
+  { CA: 5, NY: 6, ds: 599616000000 },
+  { CA: 7, NY: 8, ds: 599916000000 },
+];
+const truncatedQueryDataB = createTestQueryData(truncatedRowsB, {
+  colnames: ['ds', 'CA', 'NY'],
+  coltypes: [
+    GenericDataType.Temporal,
+    GenericDataType.Numeric,
+    GenericDataType.Numeric,
+  ],
+  label_map: { ds: ['ds'], CA: ['count', 'CA'], NY: ['count', 'NY'] },
+});
+const truncatedFormData: EchartsMixedTimeseriesFormData = {
+  ...formData,
+  metrics: ['sum__num'],
+  metricsB: ['count'],
+  groupby: ['gender'],
+  groupbyB: ['state'],
+};
+
+test('truncate metric omits the metric prefix from series and legend names', () => {
+  const chartProps = createEchartsTimeseriesTestChartProps<
+    EchartsMixedTimeseriesFormData,
+    EchartsMixedTimeseriesProps
+  >({
+    ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+    defaultQueriesData: [truncatedQueryDataA, truncatedQueryDataB],
+    formData: {
+      ...truncatedFormData,
+      truncateMetric: true,
+      truncateMetricB: true,
+    },
+    queriesData: [truncatedQueryDataA, truncatedQueryDataB],
+  });
+  const transformed = transformProps(chartProps);
+
+  const names = (transformed.echartOptions.series as SeriesOption[]).map(
+    series => String(series.name),
+  );
+  expect(names).toEqual(['girl', 'boy', 'NY', 'CA']);
+  expect((transformed.echartOptions.legend as any).data).toEqual(names);
+  expect(transformed.labelMap).toEqual({
+    boy: ['sum__num', 'boy'],
+    girl: ['sum__num', 'girl'],
+  });
+  expect(transformed.labelMapB).toEqual({
+    CA: ['count', 'CA'],
+    NY: ['count', 'NY'],
+  });
+});
+
+test('truncate metric settings apply independently to Query A and Query B', () => {
+  const chartProps = createEchartsTimeseriesTestChartProps<
+    EchartsMixedTimeseriesFormData,
+    EchartsMixedTimeseriesProps
+  >({
+    ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+    defaultQueriesData: [truncatedQueryDataA, queriesData[1]],
+    formData: {
+      ...truncatedFormData,
+      metricsB: ['sum__num'],
+      groupbyB: ['gender'],
+      truncateMetric: true,
+      truncateMetricB: false,
+    },
+    queriesData: [truncatedQueryDataA, queriesData[1]],
+  });
+  const transformed = transformProps(chartProps);
+
+  const names = (transformed.echartOptions.series as SeriesOption[]).map(
+    series => String(series.name),
+  );
+  expect(names).toEqual(['girl', 'boy', 'sum__num, girl', 'sum__num, boy']);
+  expect((transformed.echartOptions.legend as any).data).toEqual(names);
+  expect(transformed.labelMap).toEqual({
+    boy: ['sum__num', 'boy'],
+    girl: ['sum__num', 'girl'],
+  });
+  expect(transformed.labelMapB).toEqual({
+    'sum__num, boy': ['boy'],
+    'sum__num, girl': ['girl'],
+  });
+});
+
+test('truncate metric keeps query identifiers on series names', () => {
+  const chartProps = createEchartsTimeseriesTestChartProps<
+    EchartsMixedTimeseriesFormData,
+    EchartsMixedTimeseriesProps
+  >({
+    ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+    defaultQueriesData: [truncatedQueryDataA, truncatedQueryDataB],
+    formData: {
+      ...truncatedFormData,
+      truncateMetric: true,
+      truncateMetricB: true,
+      showQueryIdentifiers: true,
+    },
+    queriesData: [truncatedQueryDataA, truncatedQueryDataB],
+  });
+  const transformed = transformProps(chartProps);
+
+  const names = (transformed.echartOptions.series as SeriesOption[]).map(
+    series => String(series.name),
+  );
+  expect(names).toEqual([
+    'girl (Query A)',
+    'boy (Query A)',
+    'NY (Query B)',
+    'CA (Query B)',
+  ]);
+  expect((transformed.echartOptions.legend as any).data).toEqual(names);
+  names
+    .slice(0, transformed.seriesBreakdown)
+    .forEach(name => expect(transformed.labelMap[name]).toBeDefined());
+  names
+    .slice(transformed.seriesBreakdown)
+    .forEach(name => expect(transformed.labelMapB[name]).toBeDefined());
+});
+
+test('truncate metric tooltip resolves metric formats for both queries', () => {
+  const chartProps = createEchartsTimeseriesTestChartProps<
+    EchartsMixedTimeseriesFormData,
+    EchartsMixedTimeseriesProps
+  >({
+    ...MIXED_TIMESERIES_CHART_PROPS_DEFAULTS,
+    defaultQueriesData: [truncatedQueryDataA, truncatedQueryDataB],
+    formData: {
+      ...truncatedFormData,
+      truncateMetric: true,
+      truncateMetricB: true,
+      yAxisFormat: undefined,
+      yAxisFormatSecondary: undefined,
+      yAxisIndex: 0,
+      yAxisIndexB: 1,
+    },
+    queriesData: [truncatedQueryDataA, truncatedQueryDataB],
+    datasource: {
+      columnFormats: { sum__num: '.2%', count: '.3f' },
+    },
+  });
+  const transformed = transformProps(chartProps);
+
+  const formatter = (transformed.echartOptions.tooltip as any).formatter as (
+    params: unknown,
+  ) => string;
+  const htmlA = formatter({
+    value: [599616000000, 0.5],
+    seriesId: 'boy',
+    marker: '',
+    color: '#333',
+  });
+  expect(htmlA).toContain('boy');
+  expect(htmlA).toContain('50.00%');
+
+  const htmlB = formatter({
+    value: [599616000000, 5],
+    seriesId: 'CA',
+    marker: '',
+    color: '#333',
+  });
+  expect(htmlB).toContain('CA');
+  expect(htmlB).toContain('5.000');
+});
+
 test('formats value labels with the formatter for the assigned y-axis', () => {
   const timestamp = 1704067200000;
   const queryAData = createTestQueryData(
