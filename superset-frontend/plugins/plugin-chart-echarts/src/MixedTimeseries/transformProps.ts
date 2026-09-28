@@ -251,6 +251,8 @@ export default function transformProps(
     showQueryIdentifiers = false,
     metrics = [],
     metricsB = [],
+    truncateMetric,
+    truncateMetricB,
   }: EchartsMixedTimeseriesFormData = { ...DEFAULT_FORM_DATA, ...formData };
 
   const refs: Refs = {};
@@ -280,6 +282,12 @@ export default function transformProps(
     getMetricDisplayName(metrics[0], verboseMap) || '';
   const MetricDisplayNameB: string =
     getMetricDisplayName(metricsB[0], verboseMap) || '';
+  // Mirrors renameOperator: with a single metric, truncate_metric drops the
+  // metric level from the query result, so it must not be re-added here.
+  const metricPrefixA =
+    groupby.length > 0 && !(truncateMetric && metrics.length === 1);
+  const metricPrefixB =
+    groupbyB.length > 0 && !(truncateMetricB && metricsB.length === 1);
 
   const dataTypes = getColtypesMapping(queriesData[0]);
   const xAxisDataType = dataTypes?.[xAxisLabel] ?? dataTypes?.[xAxisOrig];
@@ -502,7 +510,7 @@ export default function transformProps(
 
     let displayName: string;
 
-    if (groupby.length > 0) {
+    if (metricPrefixA) {
       // When we have groupby, format as "metric, dimension". Each series
       // belongs to the metric recorded in its label-map tuple
       // ([metric, ...dimensions]) — always using the first metric would
@@ -519,7 +527,8 @@ export default function transformProps(
         ? entryName
         : `${metricPart}, ${entryName}`;
     } else {
-      // When no groupby, format as just the entry name with optional query identifier
+      // Without groupby or with a truncated metric, use the entry name with
+      // an optional query identifier
       displayName = showQueryIdentifiers ? `${entryName} (Query A)` : entryName;
     }
     if (labelMapValues) {
@@ -609,7 +618,7 @@ export default function transformProps(
 
     let displayName: string;
 
-    if (groupbyB.length > 0) {
+    if (metricPrefixB) {
       // When we have groupby, format as "metric, dimension". Each series
       // belongs to the metric recorded in its label-map tuple
       // ([metric, ...dimensions]) — always using the first metric would
@@ -626,7 +635,8 @@ export default function transformProps(
         ? entryName
         : `${metricPart}, ${entryName}`;
     } else {
-      // When no groupby, format as just the entry name with optional query identifier
+      // Without groupby or with a truncated metric, use the entry name with
+      // an optional query identifier
       displayName = showQueryIdentifiers ? `${entryName} (Query B)` : entryName;
     }
     if (labelMapValuesB) {
