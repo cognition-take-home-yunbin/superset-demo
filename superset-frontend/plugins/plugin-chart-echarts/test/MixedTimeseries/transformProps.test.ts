@@ -2027,6 +2027,48 @@ describe('truncate metric', () => {
     expect(transformed.labelMapB).toEqual({ CA: ['CA'], NY: ['NY'] });
   });
 
+  test('keeps truncated series distinct when both queries share dimension values', () => {
+    const sharedQueryB = createTestQueryData(truncatedRowsA, {
+      label_map: {
+        ds: ['ds'],
+        boy: ['boy'],
+        girl: ['girl'],
+        gender: ['gender'],
+        count: ['count'],
+      },
+    });
+    const transformed = transformTruncated(
+      {
+        truncateMetric: true,
+        truncateMetricB: true,
+        groupbyB: ['gender'],
+      },
+      [truncatedQueryA, sharedQueryB],
+    );
+
+    const expected = [
+      'boy (Query A)',
+      'boy (Query B)',
+      'girl (Query A)',
+      'girl (Query B)',
+    ];
+    expect(seriesNames(transformed)).toEqual(expected);
+    expect(
+      (transformed.echartOptions.series as SeriesOption[])
+        .map(series => String(series.id))
+        .sort(),
+    ).toEqual(expected);
+    expect(legendNames(transformed)).toEqual(expected);
+    expect(transformed.labelMap).toEqual({
+      'boy (Query A)': ['boy'],
+      'girl (Query A)': ['girl'],
+    });
+    expect(transformed.labelMapB).toEqual({
+      'boy (Query B)': ['boy'],
+      'girl (Query B)': ['girl'],
+    });
+  });
+
   test('applies Query A truncation independently of Query B', () => {
     const transformed = transformTruncated(
       { truncateMetric: true, truncateMetricB: false },

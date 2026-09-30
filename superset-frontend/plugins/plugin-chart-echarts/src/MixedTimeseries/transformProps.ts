@@ -485,6 +485,15 @@ export default function transformProps(
   const displayLabelMap: Record<string, string[]> = {};
   const displayLabelMapB: Record<string, string[]> = {};
 
+  // Truncated series carry only dimension values, so the same values in both
+  // queries would render as identical series; those get a query identifier.
+  const entryNamesA = new Set(
+    rawSeriesA.map(entry => String(entry.name || '')),
+  );
+  const entryNamesB = new Set(
+    rawSeriesB.map(entry => String(entry.name || '')),
+  );
+
   rawSeriesA.forEach(entry => {
     const entryName = String(entry.name || '');
     const seriesName = inverted[entryName] || entryName;
@@ -529,7 +538,12 @@ export default function transformProps(
     } else {
       // Without groupby, or with a truncated metric, format as just the entry
       // name with optional query identifier
-      displayName = showQueryIdentifiers ? `${entryName} (Query A)` : entryName;
+      const needsQueryIdentifier =
+        showQueryIdentifiers ||
+        (groupby.length > 0 &&
+          isMetricTruncatedA &&
+          entryNamesB.has(entryName));
+      displayName = needsQueryIdentifier ? `${entryName} (Query A)` : entryName;
     }
     if (labelMapValues) {
       displayLabelMap[displayName] = labelMapValues;
@@ -637,7 +651,12 @@ export default function transformProps(
     } else {
       // Without groupby, or with a truncated metric, format as just the entry
       // name with optional query identifier
-      displayName = showQueryIdentifiers ? `${entryName} (Query B)` : entryName;
+      const needsQueryIdentifier =
+        showQueryIdentifiers ||
+        (groupbyB.length > 0 &&
+          isMetricTruncatedB &&
+          entryNamesA.has(entryName));
+      displayName = needsQueryIdentifier ? `${entryName} (Query B)` : entryName;
     }
     if (labelMapValuesB) {
       displayLabelMapB[displayName] = labelMapValuesB;
